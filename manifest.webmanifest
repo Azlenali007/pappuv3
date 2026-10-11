@@ -1,0 +1,25 @@
+{
+  "name": "SMM Panel - Social Media Growth Platform",
+  "short_name": "SMM Panel",
+  "description": "Production SMM Panel with instant order fulfillment, automated provider sync, multi-currency wallet, and referral rewards.",
+  "start_url": "/user/dashboard.php",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/assets/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

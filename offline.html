@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>You are Offline - SMM Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="h-full flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">
+    <div class="max-w-md w-full text-center space-y-6 bg-slate-900/90 backdrop-blur-xl p-8 rounded-3xl border border-slate-800 shadow-2xl">
+        <div class="w-16 h-16 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center text-3xl mx-auto">
+            📡
+        </div>
+        <div>
+            <h1 class="text-2xl font-black tracking-tight">No Internet Connection</h1>
+            <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+                You appear to be offline. SMM Panel cached the application shell, but needs an active network connection to process live orders and payments.
+            </p>
+        </div>
+        <button onclick="window.location.reload()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-500/25 transition-all">
+            Try Reconnecting &rarr;
+        </button>
+    </div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# =====================================================================
+# SMM Panel .htaccess Configuration
+# Apache 2.4+ / LiteSpeed Web Server
+# =====================================================================
+
+Options -Indexes
+Options +FollowSymLinks
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Block access to hidden files (.git, .env, etc.)
+    RewriteRule (^|/)\.(?!well-known) - [F]
+
+    # Block direct access to sensitive config / sql / schema files
+    RewriteRule ^database/ - [F,L]
+    RewriteRule \.(sql|json|lock|log|md|sh)$ - [F,L]
+
+    # Remove trailing slash from non-directories
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.+)/$ /$1 [L,R=301]
+</IfModule>
+
+# Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# PHP Execution Optimization (where supported)
+<IfModule mod_php.c>
+    php_value upload_max_filesize 10M
+    php_value post_max_size 12M
+    php_value max_execution_time 60
+</IfModule>
