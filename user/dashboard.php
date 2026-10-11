@@ -44,6 +44,9 @@ try {
 // 2. Fetch Active Flash Sales for Dashboard Banner
 $dashboardFlashSales = get_active_flash_sales(5);
 
+// 3. Fetch Active Floating Voting Bubble Data
+$floatingVotingBubble = get_floating_voting_bubble_data((int)$user['id']);
+
 // Assemble Dynamic 3D Carousel Cards respecting Admin feature settings (Requirement 1)
 $carouselCards = [];
 
@@ -710,5 +713,64 @@ function dashboardFlashSaleSection(sales) {
     };
 }
 </script>
+
+<!-- Floating Community Voting Bubble Widget -->
+<div x-data="floatingVotingBubble(<?= htmlspecialchars(json_encode($floatingVotingBubble), ENT_QUOTES, 'UTF-8') ?>, '<?= CSRF::getToken() ?>')"
+     x-show="visible"
+     x-cloak
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0 translate-y-6 scale-90"
+     x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100 scale-100"
+     x-transition:leave-end="opacity-0 scale-90"
+     @mousedown="startDrag($event)"
+     @touchstart="startDrag($event)"
+     :style="hasCustomPos ? 'transform: translate3d(' + offsetX + 'px, ' + offsetY + 'px, 0);' : ''"
+     class="fixed bottom-24 right-4 sm:bottom-24 sm:right-6 z-50 select-none cursor-grab active:cursor-grabbing group">
+
+    <div class="relative flex items-center">
+        <!-- Main Circular / Round Badge Action Button -->
+        <button type="button"
+                @click="handleClick($event)"
+                class="relative flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white shadow-[0_12px_32px_-6px_rgba(37,99,235,0.45)] hover:shadow-[0_16px_36px_-6px_rgba(37,99,235,0.6)] border-2 border-white/90 active:scale-95 transition-all cursor-pointer overflow-hidden backdrop-blur-md">
+            
+            <!-- Animated Background Glow Shimmer -->
+            <div class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out pointer-events-none"></div>
+
+            <!-- Pulse Badge Icon with Live Indicator Dot -->
+            <div class="relative w-7 h-7 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                <span class="text-sm">🗳️</span>
+                <!-- Ping ring indicator -->
+                <span class="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-300"></span>
+                </span>
+            </div>
+
+            <!-- Bubble Label & Question Teaser -->
+            <div class="flex flex-col text-left pr-1 max-w-[170px] sm:max-w-[210px]">
+                <div class="flex items-center gap-1.5 leading-none">
+                    <span class="text-[10px] font-extrabold uppercase tracking-wider text-blue-200">Community Poll</span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                </div>
+                <span class="text-xs font-black tracking-tight truncate mt-0.5 text-white" 
+                      x-text="bubble ? bubble.question : 'Have Your Say!'">
+                    Have Your Say!
+                </span>
+            </div>
+        </button>
+
+        <!-- Close / Dismiss '×' Button -->
+        <button type="button"
+                data-bubble-close="true"
+                @click="dismiss($event)"
+                title="Dismiss poll notification"
+                class="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-slate-900/80 hover:bg-rose-600 text-white flex items-center justify-center text-xs font-black shadow-md border-2 border-white transition-all cursor-pointer active:scale-90 z-10"
+                aria-label="Dismiss bubble">
+            &times;
+        </button>
+    </div>
+</div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

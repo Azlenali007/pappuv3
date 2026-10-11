@@ -15,6 +15,10 @@ class Auth {
         return !empty($_SESSION['user_id']);
     }
 
+    public static function isLoggedIn(): bool {
+        return self::check();
+    }
+
     public static function user(): ?array {
         if (!self::check()) {
             return null;

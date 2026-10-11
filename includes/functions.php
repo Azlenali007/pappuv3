@@ -1471,57 +1471,76 @@ function get_floating_voting_bubble_data(int $userId): ?array {
             return null;
         }
 
-        // Get user dismissed poll IDs from database & session
-        $dismissedPollIds = $_SESSION['dismissed_poll_bubbles'] ?? [];
-        $stmtD = $db->prepare("SELECT poll_id FROM user_poll_bubble_dismissals WHERE user_id = :uid");
-        $stmtD->execute(['uid' => $userId]);
-        $dbDismissed = $stmtD->fetchAll(PDO::FETCH_COLUMN) ?: [];
-        $allDismissed = array_unique(array_merge($dismissedPollIds, array_map('intval', $dbDismissed)));
+        // Active session dismissals
+        $dismissedSession = array_map('intval', (array)($_SESSION['dismissed_poll_bubbles'] ?? []));
 
-        // Find active open published polls
-        $now = date('Y-m-d H:i:s');
-        $stmt = $db->prepare("
+        // Persistent database dismissals with timestamp
+        $stmtD = $db->prepare("SELECT poll_id, dismissed_at FROM user_poll_bubble_dismissals WHERE user_id = :uid");
+        $stmtD->execute(['uid' => $userId]);
+        $dbDismissals = $stmtD->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $dismissedTimestamps = [];
+        foreach ($dbDismissals as $d) {
+            $dismissedTimestamps[(int)$d['poll_id']] = !empty($d['dismissed_at']) ? strtotime((string)$d['dismissed_at']) : time();
+        }
+
+        // Find active open published polls (authoritative database NOW())
+        $stmt = $db->query("
             SELECT p.* 
             FROM polls p
             WHERE p.status = 'published'
-              AND (p.starts_at IS NULL OR p.starts_at <= :now1)
-              AND (p.ends_at IS NULL OR p.ends_at >= :now2)
+              AND (p.starts_at IS NULL OR p.starts_at <= NOW())
+              AND (p.ends_at IS NULL OR p.ends_at >= NOW())
             ORDER BY p.id DESC
         ");
-        $stmt->execute(['now1' => $now, 'now2' => $now]);
-        $activePolls = $stmt->fetchAll() ?: [];
+        $activePolls = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         if (empty($activePolls)) {
             return null;
         }
 
         // Check user votes for active polls
-        $pollIds = array_column($activePolls, 'id');
+        $pollIds = array_map('intval', array_column($activePolls, 'id'));
         $placeholders = implode(',', array_fill(0, count($pollIds), '?'));
         $voteStmt = $db->prepare("SELECT poll_id, option_id FROM poll_votes WHERE user_id = ? AND poll_id IN ({$placeholders})");
         $voteStmt->execute(array_merge([$userId], $pollIds));
         $userVotedMap = $voteStmt->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
 
+        // Helper to determine if a specific poll is genuinely dismissed
+        $isPollDismissed = function(array $p) use ($dismissedSession, $dismissedTimestamps): bool {
+            $pid = (int)$p['id'];
+            if (in_array($pid, $dismissedSession, true)) {
+                return true;
+            }
+            if (isset($dismissedTimestamps[$pid])) {
+                $dismissTime = $dismissedTimestamps[$pid];
+                $updateTime = !empty($p['updated_at']) ? strtotime((string)$p['updated_at']) : 0;
+                // If poll was updated/re-published after dismissal, do not suppress it
+                if ($updateTime <= $dismissTime) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         // Pick the best candidate poll:
-        // Prioritize: 1) Active poll user hasn't voted in yet and hasn't dismissed
-        //             2) Active poll user hasn't dismissed
+        // Priority 1: Active poll user hasn't voted in yet and hasn't dismissed
         $selectedPoll = null;
         foreach ($activePolls as $p) {
             $pid = (int)$p['id'];
-            if (in_array($pid, $allDismissed, true)) {
-                continue; // Dismissed by user
+            if ($isPollDismissed($p)) {
+                continue;
             }
             if (!isset($userVotedMap[$pid])) {
                 $selectedPoll = $p;
-                break; // Highest priority: unvoted & undismissed
+                break;
             }
         }
 
-        // If all unvoted were dismissed or voted, see if there is an undismissed poll
+        // Priority 2: If all unvoted polls were dismissed/unavailable, check polls that allow changing vote
         if (!$selectedPoll) {
             foreach ($activePolls as $p) {
                 $pid = (int)$p['id'];
-                if (!in_array($pid, $allDismissed, true) && (bool)$p['allow_change']) {
+                if (!$isPollDismissed($p) && (bool)$p['allow_change']) {
                     $selectedPoll = $p;
                     break;
                 }
@@ -1555,27 +1574,37 @@ function get_floating_voting_bubble_data(int $userId): ?array {
 function cast_poll_vote(PDO $db, int $pollId, int $optionId, int $userId, ?string $ipAddress = null): array {
     ensure_voting_tables_exist($db);
 
-    // 1. Authoritative check on poll
-    $now = date('Y-m-d H:i:s');
+    // 1. Authoritative check on poll status & schedule
     $pollStmt = $db->prepare("
         SELECT * FROM polls 
         WHERE id = :id 
           AND status = 'published'
-          AND (starts_at IS NULL OR starts_at <= :now1)
-          AND (ends_at IS NULL OR ends_at >= :now2)
+          AND (starts_at IS NULL OR starts_at <= NOW())
+          AND (ends_at IS NULL OR ends_at >= NOW())
         LIMIT 1
     ");
-    $pollStmt->execute(['id' => $pollId, 'now1' => $now, 'now2' => $now]);
-    $poll = $pollStmt->fetch();
+    $pollStmt->execute(['id' => $pollId]);
+    $poll = $pollStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$poll) {
-        throw new Exception("This poll is closed, inactive, or not scheduled for voting right now.");
+        // Detailed error context for client
+        $checkStmt = $db->prepare("SELECT id, status, starts_at, ends_at FROM polls WHERE id = :id LIMIT 1");
+        $checkStmt->execute(['id' => $pollId]);
+        $existingPoll = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$existingPoll) {
+            throw new Exception("The selected poll does not exist.");
+        }
+        if ($existingPoll['status'] !== 'published') {
+            throw new Exception("This poll is currently not accepting votes (status: " . htmlspecialchars($existingPoll['status']) . ").");
+        }
+        throw new Exception("This poll is closed or not currently active for voting.");
     }
 
     // 2. Validate option belongs to this poll
     $optStmt = $db->prepare("SELECT id, option_text FROM poll_options WHERE id = :oid AND poll_id = :pid LIMIT 1");
     $optStmt->execute(['oid' => $optionId, 'pid' => $pollId]);
-    $option = $optStmt->fetch();
+    $option = $optStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$option) {
         throw new Exception("Selected voting option is invalid for this poll.");
@@ -1584,13 +1613,13 @@ function cast_poll_vote(PDO $db, int $pollId, int $optionId, int $userId, ?strin
     // 3. Check existing vote
     $existStmt = $db->prepare("SELECT id, option_id FROM poll_votes WHERE poll_id = :pid AND user_id = :uid LIMIT 1");
     $existStmt->execute(['pid' => $pollId, 'uid' => $userId]);
-    $existingVote = $existStmt->fetch();
+    $existingVote = $existStmt->fetch(PDO::FETCH_ASSOC);
 
     $db->beginTransaction();
     try {
         if ($existingVote) {
             if (!(bool)$poll['allow_change']) {
-                throw new Exception("You have already voted in this poll and changing your vote is disabled.");
+                throw new Exception("You have already voted in this poll and changing your vote is not allowed.");
             }
 
             // Update existing vote
@@ -1620,7 +1649,9 @@ function cast_poll_vote(PDO $db, int $pollId, int $optionId, int $userId, ?strin
             $isChange = false;
         }
 
-        $db->commit();
+        if ($db->inTransaction()) {
+            $db->commit();
+        }
 
         return [
             'success' => true,
@@ -1630,7 +1661,9 @@ function cast_poll_vote(PDO $db, int $pollId, int $optionId, int $userId, ?strin
             'option_text' => $option['option_text']
         ];
     } catch (\Throwable $e) {
-        $db->rollBack();
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
         throw $e;
     }
 }

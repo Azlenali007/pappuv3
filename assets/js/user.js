@@ -398,6 +398,159 @@ document.addEventListener('alpine:init', () => {
     }
 });
 
+/**
+ * User Dashboard Floating Community Voting Bubble Controller
+ * Supports drag-and-drop, touch movement, click navigation, and background dismissal
+ */
+function floatingVotingBubble(initialData, csrfToken) {
+    return {
+        bubble: initialData || null,
+        visible: !!(initialData && initialData.poll_id),
+        csrfToken: csrfToken || '',
+
+        // Dragging & Interaction State
+        isDragging: false,
+        dragMoved: false,
+        startX: 0,
+        startY: 0,
+        offsetX: 0,
+        offsetY: 0,
+        startPointerX: 0,
+        startPointerY: 0,
+        hasCustomPos: false,
+
+        init() {
+            if (!this.bubble || !this.bubble.poll_id) {
+                this.checkActivePoll();
+            }
+        },
+
+        async checkActivePoll() {
+            try {
+                const apiUrl = new URL('../api/voting.php', window.location.href).href;
+                const response = await fetch(apiUrl + '?action=active_bubble', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.success && data.has_bubble && data.bubble) {
+                        this.bubble = data.bubble;
+                        this.visible = true;
+                    }
+                }
+            } catch (err) {
+                // Silently keep invisible if request fails
+            }
+        },
+
+        handleClick(e) {
+            // If movement exceeded drag threshold, cancel navigation
+            if (this.dragMoved) {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                return;
+            }
+            if (this.bubble && this.bubble.poll_id) {
+                const targetUrl = new URL('voting.php#poll-' + this.bubble.poll_id, window.location.href).href;
+                window.location.href = targetUrl;
+            }
+        },
+
+        async dismiss(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            this.visible = false;
+            if (!this.bubble || !this.bubble.poll_id) return;
+
+            try {
+                const apiUrl = new URL('../api/voting.php', window.location.href).href;
+                const formData = new FormData();
+                formData.append('action', 'dismiss_bubble');
+                formData.append('poll_id', this.bubble.poll_id);
+                formData.append('csrf_token', this.csrfToken);
+
+                await fetch(apiUrl, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': this.csrfToken
+                    }
+                });
+            } catch (err) {
+                // Ignore dismissal background error
+            }
+        },
+
+        startDrag(e) {
+            // Ignore drag if user clicked close button
+            if (e.target && e.target.closest && e.target.closest('[data-bubble-close]')) {
+                return;
+            }
+
+            this.isDragging = true;
+            this.dragMoved = false;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            this.startPointerX = clientX;
+            this.startPointerY = clientY;
+            this.startX = clientX - this.offsetX;
+            this.startY = clientY - this.offsetY;
+
+            const onMove = (moveEvent) => {
+                if (!this.isDragging) return;
+                const moveX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX;
+                const moveY = moveEvent.touches ? moveEvent.touches[0].clientY : moveEvent.clientY;
+
+                if (!this.dragMoved) {
+                    const dist = Math.hypot(moveX - this.startPointerX, moveY - this.startPointerY);
+                    if (dist > 6) {
+                        this.dragMoved = true;
+                    }
+                }
+
+                if (this.dragMoved) {
+                    this.offsetX = moveX - this.startX;
+                    this.offsetY = moveY - this.startY;
+                    this.hasCustomPos = true;
+                }
+            };
+
+            const onEnd = () => {
+                this.isDragging = false;
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onEnd);
+                window.removeEventListener('touchmove', onMove);
+                window.removeEventListener('touchend', onEnd);
+                setTimeout(() => { this.dragMoved = false; }, 80);
+            };
+
+            window.addEventListener('mousemove', onMove, { passive: true });
+            window.addEventListener('mouseup', onEnd);
+            window.addEventListener('touchmove', onMove, { passive: true });
+            window.addEventListener('touchend', onEnd);
+        }
+    };
+}
+
+window.floatingVotingBubble = floatingVotingBubble;
+
+if (window.Alpine) {
+    window.Alpine.data('floatingVotingBubble', floatingVotingBubble);
+}
+
+document.addEventListener('alpine:init', () => {
+    if (window.Alpine) {
+        window.Alpine.data('floatingVotingBubble', floatingVotingBubble);
+    }
+});
+
 // Copy text to clipboard helper with SweetAlert2 toast
 function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
     if (navigator.clipboard) {

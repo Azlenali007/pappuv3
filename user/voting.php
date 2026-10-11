@@ -355,23 +355,40 @@ function communityVotingApp(initialPolls, csrfToken) {
             poll.isSubmitting = true;
 
             try {
+                // Robust URL construction supporting root, subdirectories, domains, and port proxies
+                let apiUrl = '/api/voting.php';
+                try {
+                    apiUrl = new URL('../api/voting.php', window.location.href).href;
+                } catch (e) {
+                    apiUrl = '/api/voting.php';
+                }
+
                 const formData = new FormData();
                 formData.append('action', 'vote');
                 formData.append('poll_id', poll.id);
                 formData.append('option_id', poll.selected_option_id);
                 formData.append('csrf_token', this.csrfToken);
 
-                const response = await fetch('/api/voting.php', {
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     body: formData,
+                    credentials: 'same-origin',
                     headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': this.csrfToken
                     }
                 });
 
-                const data = await response.json();
+                let data = null;
+                const text = await response.text();
+                try {
+                    data = JSON.parse(text);
+                } catch (parseErr) {
+                    console.error('Server non-JSON response format:', text);
+                    throw new Error('Server returned an unexpected response format (HTTP ' + response.status + ').');
+                }
 
-                if (data.success && data.poll) {
+                if (response.ok && data && data.success && data.poll) {
                     // Update poll state in-place without reloading whole page
                     poll.total_votes = data.poll.total_votes;
                     poll.options = data.poll.options;
@@ -390,7 +407,7 @@ function communityVotingApp(initialPolls, csrfToken) {
                         });
                     }
                 } else {
-                    const err = data.error || 'Failed to submit vote. Please try again.';
+                    const err = (data && (data.message || data.error)) || ('Vote submission failed (HTTP ' + response.status + ').');
                     if (typeof Swal !== 'undefined') {
                         Swal.fire({
                             icon: 'error',
@@ -403,12 +420,22 @@ function communityVotingApp(initialPolls, csrfToken) {
                 }
             } catch (err) {
                 console.error('Voting submission error:', err);
+                const isRealNetworkFailure = !navigator.onLine || 
+                    (err instanceof TypeError && /failed to fetch|network|load failed/i.test(err.message));
+
+                const errorTitle = isRealNetworkFailure ? 'Network Error' : 'Vote Submission Failed';
+                const errorMsg = isRealNetworkFailure 
+                    ? 'An error occurred while connecting to the server. Please check your connection and try again.'
+                    : (err.message || 'An unexpected error occurred while processing your vote. Please try again.');
+
                 if (typeof Swal !== 'undefined') {
                     Swal.fire({
                         icon: 'error',
-                        title: 'Network Error',
-                        text: 'An error occurred while connecting to the server. Please check your connection and try again.'
+                        title: errorTitle,
+                        text: errorMsg
                     });
+                } else {
+                    alert(errorMsg);
                 }
             } finally {
                 poll.isSubmitting = false;
